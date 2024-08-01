@@ -1,4 +1,5 @@
 use crate::memory::{LinearMemory, Addressable};
+use std::collections::HashMap;
 
 #[derive(Debug)]
 #[repr(u8)]
@@ -30,12 +31,17 @@ pub enum Op {
   PopRegister(Register),
   AddStack,
   AddRegister(Register, Register),
+  Signal(u8),
 }
 
 impl Op {
   pub fn value(&self) -> u8 {
     unsafe { *<*const _>::from(self).cast::<u8>() }
   }
+}
+
+fn parse_instruction_arg(ins: u16) -> u8 {
+  ((ins & 0xff00) >> 8) as u8
 }
 
 /**
@@ -49,19 +55,21 @@ fn parse_instruction(ins: u16) -> Result<Op, String> {
   match op {
     x if x == Op::Nop.value() => Ok(Op::Nop),
     x if x == Op::Push(0).value() => {
-      let args = (ins & 0xff00) >> 8;
-      Ok(Op::Push(args as u8))
+      let args = parse_instruction_arg(ins);
+      Ok(Op::Push(args))
     },
     x if x == Op::PopRegister(Register::A).value() => {
       let reg = ((ins & 0xf00) >> 8) as u8;
-      if let Some(r) = Register::from_u8(reg) {
-        Ok(Op::PopRegister(r))
-      } else {
-        Err(format!("unknown register 0x{:X}", reg))
-      }
+      Register::from_u8(reg)
+        .ok_or(format!("unknown register 0x{:X}", reg))
+        .map(|r| Op::PopRegister(r))
     },
     x if x == Op::AddStack.value() => {
       Ok(Op::AddStack)
+    },
+    x if x == Op::Signal(0).value() => {
+      let arg = parse_instruction_arg(ins);
+      Ok(Op::Signal(arg))
     },
     _ => Err(format!("unknown operator 0x{:X}", op)),
   }
@@ -69,6 +77,7 @@ fn parse_instruction(ins: u16) -> Result<Op, String> {
 
 pub struct Machine {
   registers: [u16; 8],
+  signal_handlers: HashMap<u16, SignalFunction>,
   pub memory: Box<dyn Addressable>,
 }
 
@@ -76,6 +85,7 @@ impl Machine {
   pub fn new() -> Self {
     Self {
       registers: [0; 8],
+      signal_handlers: HashMap::new(),
       memory: Box::new(LinearMemory::new(8*1024)),
     }
   }
@@ -129,6 +139,13 @@ impl Machine {
       Op::AddRegister(r1, r2) => {
         self.registers[r1 as usize] += self.registers[r2 as usize];
         Ok(())
+      },
+      Op::Signal(signal) => {
+        let sign_fn = self.signal_handlers
+          .get(signal)
+          .ok_or(format!("unknown signal 0x{:X}", signal))?;
+
+        sign_fn(self)
       },
     }
   }
