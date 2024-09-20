@@ -1,5 +1,6 @@
-use crate::memory::{LinearMemory, Addressable};
 use std::collections::HashMap;
+
+use crate::memory::{LinearMemory, Addressable};
 
 #[derive(Debug)]
 #[repr(u8)]
@@ -75,9 +76,12 @@ fn parse_instruction(ins: u16) -> Result<Op, String> {
   }
 }
 
+type SignalFunction = fn(&mut Machine) -> Result<(), String>;
+
 pub struct Machine {
   registers: [u16; 8],
-  signal_handlers: HashMap<u16, SignalFunction>,
+  signal_handlers: HashMap<u8, SignalFunction>,
+  pub halt: bool,
   pub memory: Box<dyn Addressable>,
 }
 
@@ -86,12 +90,17 @@ impl Machine {
     Self {
       registers: [0; 8],
       signal_handlers: HashMap::new(),
+      halt: false,
       memory: Box::new(LinearMemory::new(8*1024)),
     }
   }
 
   pub fn get_register(&self, r: Register) -> u16 {
     self.registers[r as usize]
+  }
+
+  pub fn define_handler(&mut self, index: u8, f: SignalFunction) {
+    self.signal_handlers.insert(index, f);
   }
 
   pub fn pop(&mut self) -> Result<u16, String> {
@@ -116,16 +125,15 @@ impl Machine {
 
   pub fn step(&mut self) -> Result<(), String> {
     let pc = self.registers[Register::PC as usize];
-    let instruction = self.memory.read2(pc).unwrap();
+    let instruction = self.memory
+      .read2(pc)
+      .ok_or(format!("failed to read pc @ 0x{:X}", pc))?;
     self.registers[Register::PC as usize] = pc + 2;
 
     let op = parse_instruction(instruction)?;
     match op {
       Op::Nop => Ok(()),
-      Op::Push(v) => {
-        self.push(v.into());
-        Ok(())
-      },
+      Op::Push(v) => self.push(v.into()),
       Op::PopRegister(r) => {
         let value = self.pop()?;
         self.registers[r as usize] = value;
@@ -142,7 +150,7 @@ impl Machine {
       },
       Op::Signal(signal) => {
         let sign_fn = self.signal_handlers
-          .get(signal)
+          .get(&signal)
           .ok_or(format!("unknown signal 0x{:X}", signal))?;
 
         sign_fn(self)

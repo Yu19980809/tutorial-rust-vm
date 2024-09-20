@@ -10,7 +10,8 @@ fn main() -> Result<(), String> {
     panic!("usage: {} <input>", args[0]);
   }
 
-  let file = File::open(Path::new(&args[1])).map_err(|e| format!("failed to open: {}", e))?;
+  let file = File::open(Path::new(&args[1]))
+    .map_err(|e| format!("failed to open: {}", e))?;
 
   /*
    *  for each line in file
@@ -20,8 +21,10 @@ fn main() -> Result<(), String> {
    *      else die 
    */
   let mut output: Vec<u8> = Vec::new();
+  
   for line in BufReader::new(file).lines() {
     let line_inner = line.map_err(|_e| "foo")?;
+
     for t in line_inner.split(" ").filter(|x| x.len() > 0) {
       let b = u8::from_str_radix(t, 16).map_err(|e| format!("parse int: {}", e))?;
       output.push(b);
